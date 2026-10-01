@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Real Estate Assistant</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1b1f24; --muted: #5f6b7a; --border: #dde1e6;
+    --accent: #2457d6; --accent-text: #fff; --user: #e8eefc; --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --panel: #1a1e24; --text: #e6e9ee; --muted: #9aa5b3; --border: #2c323b;
+      --accent: #6d95ff; --accent-text: #0b1020; --user: #233056; --chip: #262c35;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header span { color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 16px; padding: 16px; max-width: 1280px; margin: 0 auto; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; min-width: 0; }
+  h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  #log { height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .msg { padding: 8px 11px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.user { background: var(--user); align-self: flex-end; max-width: 85%; }
+  .msg.bot { background: var(--chip); max-width: 95%; }
+  .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  form { display: flex; gap: 8px; }
+  input, select { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+  form { flex-wrap: wrap; }
+  #chat-input { flex: 1 1 220px; }
+  select { flex: 0 0 auto; }
+  .steps { margin: 4px 0 0; padding-left: 18px; font-family: ui-monospace, monospace; font-size: 12px; }
+  button { padding: 9px 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-text); font: inherit; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  .examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .examples button { background: var(--chip); color: var(--text); font-size: 13px; padding: 5px 10px; }
+  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .card { border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+  .card h3 { font-size: 15px; margin: 0 0 4px; }
+  .price { font-weight: 600; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .tag { background: var(--chip); border-radius: 999px; padding: 1px 8px; font-size: 12px; }
+  .calc { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 10px; }
+  .calc label { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+  #mortgage-out { font-size: 15px; }
+  .right { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏠 Real Estate Assistant</h1>
+  <span id="status">Loading…</span>
+</header>
+<main>
+  <section>
+    <h2>Chat</h2>
+    <div id="log" aria-live="polite"></div>
+    <form id="chat-form">
+      <input id="chat-input" placeholder="e.g. 2-bedroom apartment in Krakow under 900k" autocomplete="off" required>
+      <select id="mode" aria-label="Mode" title="Pipeline: our code picks one tool. Agent: Claude picks tools in a loop.">
+        <option value="pipeline">Pipeline</option>
+        <option value="agent">Agent</option>
+      </select>
+      <button id="send">Send</button>
+    </form>
+    <div class="examples" id="examples"></div>
+  </section>
+
+  <div class="right">
+    <section>
+      <h2 id="results-title">Listings</h2>
+      <div id="cards"><p class="muted">Ask a question to see matching listings.</p></div>
+    </section>
+    <section>
+      <h2>Mortgage calculator</h2>
+      <div class="calc">
+        <label>Price (PLN)<input id="m-price" type="number" value="750000" min="1"></label>
+        <label>Down payment %<input id="m-down" type="number" value="20" min="0" max="100"></label>
+        <label>Interest %<input id="m-rate" type="number" value="6.5" min="0" step="0.1"></label>
+        <label>Years<input id="m-years" type="number" value="30" min="1" max="50"></label>
+      </div>
+      <div id="mortgage-out"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => Math.round(n).toLocaleString("en-US");
+const history = [];
+const EXAMPLES = [
+  "2-bedroom apartment in Krakow under 900k",
+  "flats for rent in Warsaw between 3000 and 5000 with balcony",
+  "house with garden in Gdansk",
+  "mortgage on 750k with 10% down at 6% for 25 years",
+  "average price per m2 in each city",
+];
+
+function el(tag, attrs = {}, text) {
+  const node = document.createElement(tag);
+  Object.assign(node, attrs);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function addMessage(role, text, meta, steps = []) {
+  const msg = el("div", { className: `msg ${role}` }, text);
+  if (meta) msg.append(el("div", { className: "meta" }, meta));
+  if (steps.length) {
+    // The agent's tool calls, in order: this is the loop made visible.
+    const list = el("ol", { className: "steps meta" });
+    for (const s of steps) list.append(el("li", {}, `${s.tool}(${JSON.stringify(s.input)})${s.error ? " ✗ error" : ""}`));
+    msg.append(list);
+  }
+  $("log").append(msg);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+function renderCards(properties) {
+  const cards = $("cards");
+  cards.replaceChildren();
+  $("results-title").textContent = properties.length ? `Listings (${properties.length})` : "Listings";
+  if (!properties.length) {
+    cards.append(el("p", { className: "muted" }, "No listings for this answer."));
+    return;
+  }
+  for (const p of properties) {
+    const card = el("div", { className: "card" });
+    card.append(el("h3", {}, p.title));
+    card.append(el("div", { className: "muted" }, `${p.id} · ${p.city}, ${p.district}`));
+    const price = p.listing_type === "rent" ? `${fmt(p.price)} PLN / month` : `${fmt(p.price)} PLN`;
+    card.append(el("div", { className: "price" }, price));
+    const details = `${p.rooms} rooms · ${p.area_sqm} m² · built ${p.year_built} · energy ${p.energy_rating}`;
+    card.append(el("div", { className: "muted" }, details));
+    if (p.monthly_payment_estimate) {
+      card.append(el("div", { className: "muted" }, `≈ ${fmt(p.monthly_payment_estimate)} PLN/mo mortgage (20% down, 30y, 6.5%)`));
+    }
+    const tags = el("div", { className: "tags" });
+    const labels = { has_parking: "parking", has_garden: "garden", has_pool: "pool", is_furnished: "furnished",
+                     has_elevator: "elevator", has_balcony: "balcony", pets_allowed: "pets ok" };
+    for (const [key, label] of Object.entries(labels)) if (p[key]) tags.append(el("span", { className: "tag" }, label));
+    card.append(tags);
+    cards.append(card);
+  }
+}
+
+async function sendChat(text) {
+  addMessage("user", text);
+  $("send").disabled = true;
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, history, mode: $("mode").value }),
+    });
+    if (!res.ok) {
+      const detail = await res.json().then((b) => b.detail).catch(() => null);
+      throw new Error(typeof detail === "string" ? detail : `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const { intent, filters } = data.analysis;
+    const filterText = Object.keys(filters).length ? ` · filters: ${JSON.stringify(filters)}` : "";
+    const meta = data.steps
+      ? `agent · ${data.steps.length} tool call${data.steps.length === 1 ? "" : "s"}:`
+      : `${data.mode} · intent: ${intent}${filterText}${data.note ? ` · ${data.note}` : ""}`;
+    addMessage("bot", data.answer, meta, data.steps || []);
+    history.push({ role: "user", content: text }, { role: "assistant", content: data.answer });
+    if (data.properties.length || intent === "search") renderCards(data.properties);
+    if (data.mortgage) {
+      $("m-price").value = data.mortgage.price;
+      $("m-down").value = Math.round(100 * data.mortgage.down_payment / data.mortgage.price);
+      $("m-rate").value = data.mortgage.interest_rate;
+      $("m-years").value = data.mortgage.years;
+      updateMortgage();
+    }
+  } catch (err) {
+    addMessage("bot", `Something went wrong: ${err.message}`);
+  } finally {
+    $("send").disabled = false;
+  }
+}
+
+async function updateMortgage() {
+  const params = new URLSearchParams({
+    price: $("m-price").value, down_payment_percent: $("m-down").value,
+    interest_rate: $("m-rate").value, years: $("m-years").value,
+  });
+  const res = await fetch(`/api/mortgage?${params}`);
+  if (!res.ok) { $("mortgage-out").textContent = "Check the inputs."; return; }
+  const m = await res.json();
+  $("mortgage-out").replaceChildren(
+    el("div", { className: "price" }, `${fmt(m.monthly_payment)} PLN / month`),
+    el("div", { className: "muted" }, `Loan ${fmt(m.loan_amount)} · total interest ${fmt(m.total_interest)} · total cost ${fmt(m.total_cost)} PLN`),
+  );
+}
+
+$("chat-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = $("chat-input").value.trim();
+  if (!text) return;
+  $("chat-input").value = "";
+  sendChat(text);
+});
+for (const id of ["m-price", "m-down", "m-rate", "m-years"]) $(id).addEventListener("input", updateMortgage);
+for (const q of EXAMPLES) {
+  const b = el("button", { type: "button" }, q);
+  b.addEventListener("click", () => sendChat(q));
+  $("examples").append(b);
+}
+
+fetch("/api/health").then((r) => r.json()).then((h) => {
+  $("status").textContent = `${h.properties} listings · ${h.llm ? "Claude answers on" : "offline mode (no API key)"}`;
+  if (!h.llm) {
+    const agent = document.querySelector('#mode option[value="agent"]');
+    agent.disabled = true;
+    agent.textContent = "Agent (needs API key)";
+  }
+});
+addMessage("bot", "Hi! Ask me to find listings, estimate a mortgage, or compare city prices.");
+updateMortgage();
+</script>
+</body>
+</html>
