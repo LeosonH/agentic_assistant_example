@@ -1,4 +1,4 @@
-# Real Estate Assistant — simplified
+# Real Estate Assistant (Simplified)
 
 A small rewrite of [AleksNeStu/ai-real-estate-assistant](https://github.com/AleksNeStu/ai-real-estate-assistant).
 It keeps the core idea and drops the platform around it. Ask in plain English and get matching
